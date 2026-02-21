@@ -21,13 +21,10 @@ canvas{ display:block; }
 <canvas id="game"></canvas>
 
 <script>
-/* =========================================================
-   CANVAS SETUP
-========================================================= */
+/* ================= CANVAS ================= */
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-
 let DPR = window.devicePixelRatio || 1;
 
 function resize(){
@@ -37,934 +34,6 @@ function resize(){
   canvas.width = w * DPR;
   canvas.height = h * DPR;
   canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
-
-  ctx.setTransform(DPR,0,0,DPR,0,0);
-}
-window.addEventListener("resize", resize);
-resize();
-
-/* =========================================================
-   LOADERS
-========================================================= */
-
-function loadImage(src){
-  const img = new Image();
-  img.src = src;
-  img.loaded = false;
-  img.onload = () => img.loaded = true;
-  return img;
-}
-
-function loadAudio(src){
-  const a = new Audio(src);
-  a.preload = "auto";
-  return a;
-}
-
-function playSound(s){
-  try{
-    s.currentTime = 0;
-    s.play();
-  }catch(e){}
-}
-
-function playRandom(arr){
-  playSound(arr[Math.floor(Math.random()*arr.length)]);
-}
-
-/* =========================================================
-   ASSETS
-========================================================= */
-
-const IMG = {
-  duck: loadImage("duck.png"),
-  obstacle: loadImage("obstacle.png"),
-  beer: loadImage("beer.png"),
-  bgFar: loadImage("bg_far.png"),
-  tree: loadImage("bg_mid.png")
-};
-
-const SFX = {
-  jump:[loadAudio("jump1.mp3"), loadAudio("jump2.mp3")],
-  quack:[loadAudio("quack1.mp3"), loadAudio("quack2.mp3")],
-  hit: loadAudio("hit.mp3"),
-  power: loadAudio("power.mp3")
-};
-
-/* =========================================================
-   AUDIO UNLOCK
-========================================================= */
-
-let audioUnlocked=false;
-function unlockAudio(){
-  if(audioUnlocked) return;
-  Object.values(SFX).flat().forEach(s=>{
-    s.play().then(()=>s.pause()).catch(()=>{});
-  });
-  audioUnlocked=true;
-}
-
-/* =========================================================
-   GAME STATE + HIGH SCORE
-========================================================= */
-
-let state="MENU";
-const HS_KEY="runningDuckHighScore";
-let highScore = Number(localStorage.getItem(HS_KEY) || 0);
-
-let newHighScore=false;
-let newHighScoreTimer=0;
-
-/* =========================================================
-   CAMERA SHAKE
-========================================================= */
-
-let shakeTime=0;
-let shakePower=0;
-
-function triggerShake(power,duration){
-  shakePower=power;
-  shakeTime=duration;
-}
-
-/* =========================================================
-   BACKGROUND
-========================================================= */
-
-class Parallax{
-  constructor(img,speed){
-    this.img=img;
-    this.speed=speed;
-    this.x=0;
-  }
-  update(dt){
-    this.x-=this.speed*dt;
-    if(this.x<=-canvas.width/DPR) this.x=0;
-  }
-  draw(){
-    if(!this.img.loaded) return;
-    const w=canvas.width/DPR;
-    const h=canvas.height/DPR;
-    ctx.drawImage(this.img,this.x,0,w,h*0.7);
-    ctx.drawImage(this.img,this.x+w,0,w,h*0.7);
-  }
-}
-
-class TreeLayer{
-  constructor(img,speed){
-    this.img=img;
-    this.speed=speed;
-    this.trees=[];
-    this.spawn();
-  }
-  spawn(){
-    const spacing=500;
-    for(let i=0;i<6;i++){
-      this.trees.push({x:i*spacing,scale:0.6+Math.random()*0.4});
-    }
-  }
-  update(dt){
-    this.trees.forEach(t=>t.x-=this.speed*dt);
-    if(this.trees.length && this.trees[0].x<-300) this.trees.shift();
-    const last=this.trees[this.trees.length-1];
-    if(last && last.x<canvas.width/DPR-500){
-      this.trees.push({x:canvas.width/DPR+200,scale:0.6+Math.random()*0.4});
-    }
-  }
-  draw(){
-    if(!this.img.loaded) return;
-    this.trees.forEach(t=>{
-      const w=this.img.width*t.scale;
-      const h=this.img.height*t.scale;
-      ctx.drawImage(this.img,t.x,(canvas.height/DPR)-h-80,w,h);
-    });
-  }
-}
-
-const bgFar=new Parallax(IMG.bgFar,20);
-const trees=new TreeLayer(IMG.tree,80);
-
-/* =========================================================
-   DUCK
-========================================================= */
-
-class Duck{
-  constructor(){
-    this.w=Math.min(140,window.innerWidth*0.25);
-    this.h=this.w;
-    this.x=window.innerWidth*0.15;
-    this.groundY=window.innerHeight-160;
-    this.y=this.groundY;
-    this.vy=0;
-    this.gravity=2200;
-    this.jumpV=-900;
-    this.grounded=true;
-    this.rot=0;
-  }
-
-  jump(){
-    if(!this.grounded) return;
-    this.vy=this.jumpV;
-    this.grounded=false;
-    playRandom(SFX.jump);
-    playRandom(SFX.quack);
-  }
-
-  update(dt){
-    this.vy+=this.gravity*dt;
-    this.y+=this.vy*dt;
-    if(this.y>=this.groundY){
-      this.y=this.groundY;
-      this.vy=0;
-      this.grounded=true;
-    }
-    if(!this.grounded) this.rot+=0.1;
-    else this.rot*=0.85;
-  }
-
-  draw(inv){
-    if(!IMG.duck.loaded) return;
-    ctx.save();
-    ctx.translate(this.x+this.w/2,this.y+this.h/2);
-    ctx.rotate(this.rot);
-    if(inv){
-      ctx.shadowBlur=25;
-      ctx.shadowColor="yellow";
-    }
-    ctx.drawImage(IMG.duck,-this.w/2,-this.h/2,this.w,this.h);
-    ctx.restore();
-  }
-
-  get hitbox(){
-    return {x:this.x+40,y:this.y+40,w:this.w-80,h:this.h-60};
-  }
-}
-
-/* =========================================================
-   OBSTACLE + BEER
-========================================================= */
-
-class Obstacle{
-  constructor(speed){
-    this.w=80;
-    this.h=100;
-    this.x=window.innerWidth+100;
-    this.y=window.innerHeight-140;
-    this.speed=speed;
-  }
-  update(dt){ this.x-=this.speed*dt; }
-  draw(){ if(IMG.obstacle.loaded) ctx.drawImage(IMG.obstacle,this.x,this.y,this.w,this.h); }
-  get hitbox(){ return this; }
-}
-
-class Beer{
-  constructor(){
-    this.w=70;
-    this.h=70;
-    this.x=window.innerWidth+200;
-    this.y=window.innerHeight-250;
-    this.speed=300;
-  }
-  update(dt){ this.x-=this.speed*dt; }
-  draw(){ if(IMG.beer.loaded) ctx.drawImage(IMG.beer,this.x,this.y,this.w,this.h); }
-  get hitbox(){ return this; }
-}
-
-/* =========================================================
-   GAME CORE
-========================================================= */
-
-let duck=new Duck();
-let obstacles=[];
-let beer=null;
-let score=0;
-let invTimer=0;
-let spawnTimer=0;
-let worldSpeed=500;
-let last=performance.now();
-
-function reset(){
-  duck=new Duck();
-  obstacles=[];
-  beer=null;
-  score=0;
-  invTimer=0;
-  newHighScore=false;
-  newHighScoreTimer=0;
-}
-
-function checkCollision(a,b){
-  return(
-    a.x<b.x+b.w &&
-    a.x+a.w>b.x &&
-    a.y<b.y+b.h &&
-    a.y+a.h>b.y
-  );
-}
-
-function update(dt){
-  bgFar.update(dt);
-  trees.update(dt);
-
-  if(state!=="PLAYING") return;
-
-  duck.update(dt);
-  invTimer=Math.max(0,invTimer-dt);
-
-  spawnTimer+=dt;
-  if(spawnTimer>2){
-    spawnTimer=0;
-    obstacles.push(new Obstacle(worldSpeed));
-  }
-
-  obstacles.forEach(o=>o.update(dt));
-  obstacles=obstacles.filter(o=>o.x>-100);
-
-  if(Math.random()<0.003 && !beer)
-    beer=new Beer();
-
-  if(beer){
-    beer.update(dt);
-    if(checkCollision(duck.hitbox,beer.hitbox)){
-      invTimer=4;
-      playSound(SFX.power);
-      triggerShake(25,0.4);
-      beer=null;
-    }
-  }
-
-  for(const o of obstacles){
-    if(checkCollision(duck.hitbox,o.hitbox)){
-      if(invTimer<=0){
-        playSound(SFX.hit);
-        triggerShake(30,0.5);
-        state="GAMEOVER";
-
-        const finalScore=Math.floor(score);
-        if(finalScore>highScore){
-          highScore=finalScore;
-          localStorage.setItem(HS_KEY,highScore);
-          newHighScore=true;
-          newHighScoreTimer=2.0;
-        }
-      }
-    }
-  }
-
-  score+=dt*3;
-}
-
-/* =========================================================
-   MENU BUTTON
-========================================================= */
-
-function drawButton(text,y){
-  const w=240;
-  const h=60;
-  const x=window.innerWidth/2-w/2;
-
-  ctx.fillStyle="#ffcc00";
-  ctx.fillRect(x,y,w,h);
-
-  ctx.fillStyle="#000";
-  ctx.textAlign="center";
-  ctx.font="28px Arial";
-  ctx.fillText(text,window.innerWidth/2,y+40);
-
-  return {x,y,w,h};
-}
-
-let startBtn,restartBtn;
-
-function draw(){
-  ctx.save();
-
-  if(shakeTime>0){
-    ctx.translate((Math.random()-0.5)*shakePower,(Math.random()-0.5)*shakePower);
-    shakeTime-=1/60;
-  }
-
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  bgFar.draw();
-  trees.draw();
-
-  ctx.fillStyle="#228B22";
-  ctx.fillRect(0,window.innerHeight-80,window.innerWidth,80);
-
-  if(state==="PLAYING"){
-    duck.draw(invTimer>0);
-    obstacles.forEach(o=>o.draw());
-    if(beer) beer.draw();
-
-    ctx.fillStyle="#000";
-    ctx.font="26px Arial";
-    ctx.fillText("Score: "+Math.floor(score),20,40);
-    ctx.fillText("High: "+highScore,20,70);
-  }
-
-  if(state==="MENU"){
-    ctx.fillStyle="rgba(0,0,0,0.5)";
-    ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
-
-    ctx.fillStyle="#fff";
-    ctx.textAlign="center";
-    ctx.font="48px Arial";
-    ctx.fillText("RUNNING DUCK",window.innerWidth/2,window.innerHeight/3);
-
-    ctx.font="26px Arial";
-    ctx.fillText("High Score: "+highScore,
-      window.innerWidth/2,
-      window.innerHeight/3+60);
-
-    startBtn=drawButton("START",window.innerHeight/2);
-  }
-
-  if(state==="GAMEOVER"){
-    ctx.fillStyle="rgba(0,0,0,0.6)";
-    ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
-
-    ctx.fillStyle="#fff";
-    ctx.textAlign="center";
-    ctx.font="40px Arial";
-    ctx.fillText("GAME OVER",window.innerWidth/2,window.innerHeight/3);
-
-    ctx.font="26px Arial";
-    ctx.fillText("Score: "+Math.floor(score),
-      window.innerWidth/2,
-      window.innerHeight/3+50);
-
-    ctx.fillText("High Score: "+highScore,
-      window.innerWidth/2,
-      window.innerHeight/3+90);
-
-    if(newHighScore && newHighScoreTimer>0){
-      const pulse=1+Math.sin(performance.now()*0.01)*0.08;
-
-      ctx.save();
-      ctx.translate(window.innerWidth/2,window.innerHeight/2-120);
-      ctx.scale(pulse,pulse);
-      ctx.fillStyle="gold";
-      ctx.shadowBlur=20;
-      ctx.shadowColor="yellow";
-      ctx.font="bold 42px Arial";
-      ctx.fillText("NEW HIGH SCORE!",0,0);
-      ctx.restore();
-
-      newHighScoreTimer-=1/60;
-    }
-
-    restartBtn=drawButton("RESTART",window.innerHeight/2);
-  }
-
-  ctx.restore();
-}
-
-function loop(now){
-  const dt=Math.min(0.033,(now-last)/1000);
-  last=now;
-  update(dt);
-  draw();
-  requestAnimationFrame(loop);
-}
-requestAnimationFrame(loop);
-
-/* =========================================================
-   INPUT
-========================================================= */
-
-function handleTap(x,y){
-  unlockAudio();
-
-  if(state==="MENU" && startBtn &&
-     x>startBtn.x && x<startBtn.x+startBtn.w &&
-     y>startBtn.y && y<startBtn.y+startBtn.h){
-       state="PLAYING";
-  }
-  else if(state==="GAMEOVER" && restartBtn &&
-     x>restartBtn.x && x<restartBtn.x+restartBtn.w &&
-     y>restartBtn.y && y<restartBtn.y+restartBtn.h){
-       reset();
-       state="PLAYING";
-  }
-  else if(state==="PLAYING"){
-       duck.jump();
-  }
-}
-
-canvas.addEventListener("touchstart",e=>{
-  e.preventDefault();
-  const rect=canvas.getBoundingClientRect();
-  handleTap(
-    e.touches[0].clientX-rect.left,
-    e.touches[0].clientY-rect.top
-  );
-},{passive:false});
-
-canvas.addEventListener("mousedown",e=>{
-  const rect=canvas.getBoundingClientRect();
-  handleTap(
-    e.clientX-rect.left,
-    e.clientY-rect.top
-  );
-});
-</script>
-</body>
-</html>  const h = window.innerHeight;
-
-  canvas.width = w * DPR;
-  canvas.height = h * DPR;
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
-
-  ctx.setTransform(DPR,0,0,DPR,0,0);
-}
-window.addEventListener("resize", resize);
-resize();
-
-/* =========================================================
-   LOADERS
-========================================================= */
-
-function loadImage(src){
-  const img = new Image();
-  img.src = src;
-  img.loaded = false;
-  img.onload = () => img.loaded = true;
-  return img;
-}
-
-function loadAudio(src){
-  const a = new Audio(src);
-  a.preload = "auto";
-  return a;
-}
-
-function playSound(s){
-  try{
-    s.currentTime = 0;
-    s.play();
-  }catch(e){}
-}
-
-function playRandom(arr){
-  playSound(arr[Math.floor(Math.random()*arr.length)]);
-}
-
-/* =========================================================
-   ASSETS
-========================================================= */
-
-const IMG = {
-  duck: loadImage("duck.png"),
-  obstacle: loadImage("obstacle.png"),
-  beer: loadImage("beer.png"),
-  bgFar: loadImage("bg_far.png"),
-  tree: loadImage("bg_mid.png")
-};
-
-const SFX = {
-  jump:[loadAudio("jump1.mp3"), loadAudio("jump2.mp3")],
-  quack:[loadAudio("quack1.mp3"), loadAudio("quack2.mp3")],
-  hit: loadAudio("hit.mp3"),
-  power: loadAudio("power.mp3")
-};
-
-/* =========================================================
-   AUDIO UNLOCK (Mobile Requirement)
-========================================================= */
-
-let audioUnlocked=false;
-function unlockAudio(){
-  if(audioUnlocked) return;
-  Object.values(SFX).flat().forEach(s=>{
-    s.play().then(()=>s.pause()).catch(()=>{});
-  });
-  audioUnlocked=true;
-}
-
-/* =========================================================
-   GAME STATE + HIGH SCORE
-========================================================= */
-
-let state="MENU";
-
-const HS_KEY="runningDuckHighScore";
-let highScore = Number(localStorage.getItem(HS_KEY) || 0);
-
-/* =========================================================
-   CAMERA SHAKE
-========================================================= */
-
-let shakeTime=0;
-let shakePower=0;
-
-function triggerShake(power,duration){
-  shakePower=power;
-  shakeTime=duration;
-}
-
-/* =========================================================
-   BACKGROUND (Parallax + Trees)
-========================================================= */
-
-class Parallax{
-  constructor(img,speed){
-    this.img=img;
-    this.speed=speed;
-    this.x=0;
-  }
-  update(dt){
-    this.x-=this.speed*dt;
-    if(this.x<=-canvas.width/DPR) this.x=0;
-  }
-  draw(){
-    if(!this.img.loaded) return;
-    const w=canvas.width/DPR;
-    const h=canvas.height/DPR;
-    ctx.drawImage(this.img,this.x,0,w,h*0.7);
-    ctx.drawImage(this.img,this.x+w,0,w,h*0.7);
-  }
-}
-
-class TreeLayer{
-  constructor(img,speed){
-    this.img=img;
-    this.speed=speed;
-    this.trees=[];
-    this.spawn();
-  }
-  spawn(){
-    const spacing=500;
-    for(let i=0;i<6;i++){
-      this.trees.push({x:i*spacing,scale:0.6+Math.random()*0.4});
-    }
-  }
-  update(dt){
-    this.trees.forEach(t=>t.x-=this.speed*dt);
-    if(this.trees.length && this.trees[0].x<-300) this.trees.shift();
-    const last=this.trees[this.trees.length-1];
-    if(last && last.x<canvas.width/DPR-500){
-      this.trees.push({x:canvas.width/DPR+200,scale:0.6+Math.random()*0.4});
-    }
-  }
-  draw(){
-    if(!this.img.loaded) return;
-    this.trees.forEach(t=>{
-      const w=this.img.width*t.scale;
-      const h=this.img.height*t.scale;
-      ctx.drawImage(this.img,t.x,(canvas.height/DPR)-h-80,w,h);
-    });
-  }
-}
-
-const bgFar=new Parallax(IMG.bgFar,20);
-const trees=new TreeLayer(IMG.tree,80);
-
-/* =========================================================
-   DUCK
-========================================================= */
-
-class Duck{
-  constructor(){
-    this.w=Math.min(140,window.innerWidth*0.25);
-    this.h=this.w;
-    this.x=window.innerWidth*0.15;
-    this.groundY=window.innerHeight-160;
-    this.y=this.groundY;
-    this.vy=0;
-    this.gravity=2200;
-    this.jumpV=-900;
-    this.grounded=true;
-    this.rot=0;
-  }
-
-  jump(){
-    if(!this.grounded) return;
-    this.vy=this.jumpV;
-    this.grounded=false;
-    playRandom(SFX.jump);
-    playRandom(SFX.quack);
-  }
-
-  update(dt){
-    this.vy+=this.gravity*dt;
-    this.y+=this.vy*dt;
-    if(this.y>=this.groundY){
-      this.y=this.groundY;
-      this.vy=0;
-      this.grounded=true;
-    }
-    if(!this.grounded) this.rot+=0.1;
-    else this.rot*=0.85;
-  }
-
-  draw(inv){
-    if(!IMG.duck.loaded) return;
-    ctx.save();
-    ctx.translate(this.x+this.w/2,this.y+this.h/2);
-    ctx.rotate(this.rot);
-    if(inv){
-      ctx.shadowBlur=25;
-      ctx.shadowColor="yellow";
-    }
-    ctx.drawImage(IMG.duck,-this.w/2,-this.h/2,this.w,this.h);
-    ctx.restore();
-  }
-
-  get hitbox(){
-    return {x:this.x+40,y:this.y+40,w:this.w-80,h:this.h-60};
-  }
-}
-
-/* =========================================================
-   OBSTACLES + BEER
-========================================================= */
-
-class Obstacle{
-  constructor(speed){
-    this.w=80;
-    this.h=100;
-    this.x=window.innerWidth+100;
-    this.y=window.innerHeight-140;
-    this.speed=speed;
-  }
-  update(dt){ this.x-=this.speed*dt; }
-  draw(){ if(IMG.obstacle.loaded) ctx.drawImage(IMG.obstacle,this.x,this.y,this.w,this.h); }
-  get hitbox(){ return this; }
-}
-
-class Beer{
-  constructor(){
-    this.w=70;
-    this.h=70;
-    this.x=window.innerWidth+200;
-    this.y=window.innerHeight-250;
-    this.speed=300;
-  }
-  update(dt){ this.x-=this.speed*dt; }
-  draw(){ if(IMG.beer.loaded) ctx.drawImage(IMG.beer,this.x,this.y,this.w,this.h); }
-  get hitbox(){ return this; }
-}
-
-/* =========================================================
-   GAME CORE
-========================================================= */
-
-let duck=new Duck();
-let obstacles=[];
-let beer=null;
-let score=0;
-let invTimer=0;
-let spawnTimer=0;
-let worldSpeed=500;
-let last=performance.now();
-
-function reset(){
-  duck=new Duck();
-  obstacles=[];
-  beer=null;
-  score=0;
-  invTimer=0;
-}
-
-function checkCollision(a,b){
-  return(
-    a.x<b.x+b.w &&
-    a.x+a.w>b.x &&
-    a.y<b.y+b.h &&
-    a.y+a.h>b.y
-  );
-}
-
-function update(dt){
-  bgFar.update(dt);
-  trees.update(dt);
-
-  if(state!=="PLAYING") return;
-
-  duck.update(dt);
-  invTimer=Math.max(0,invTimer-dt);
-
-  spawnTimer+=dt;
-  if(spawnTimer>2){
-    spawnTimer=0;
-    obstacles.push(new Obstacle(worldSpeed));
-  }
-
-  obstacles.forEach(o=>o.update(dt));
-  obstacles=obstacles.filter(o=>o.x>-100);
-
-  if(Math.random()<0.003 && !beer)
-    beer=new Beer();
-
-  if(beer){
-    beer.update(dt);
-    if(checkCollision(duck.hitbox,beer.hitbox)){
-      invTimer=4;
-      playSound(SFX.power);
-      triggerShake(25,0.4);
-      beer=null;
-    }
-  }
-
-  for(const o of obstacles){
-    if(checkCollision(duck.hitbox,o.hitbox)){
-      if(invTimer<=0){
-        playSound(SFX.hit);
-        triggerShake(30,0.5);
-        state="GAMEOVER";
-
-        const finalScore=Math.floor(score);
-        if(finalScore>highScore){
-          highScore=finalScore;
-          localStorage.setItem(HS_KEY,highScore);
-        }
-      }
-    }
-  }
-
-  score+=dt*3;
-}
-
-/* =========================================================
-   MENU BUTTON
-========================================================= */
-
-function drawButton(text,y){
-  const w=240;
-  const h=60;
-  const x=window.innerWidth/2-w/2;
-
-  ctx.fillStyle="#ffcc00";
-  ctx.fillRect(x,y,w,h);
-
-  ctx.fillStyle="#000";
-  ctx.textAlign="center";
-  ctx.font="28px Arial";
-  ctx.fillText(text,window.innerWidth/2,y+40);
-
-  return {x,y,w,h};
-}
-
-let startBtn,restartBtn;
-
-function draw(){
-  ctx.save();
-
-  if(shakeTime>0){
-    ctx.translate((Math.random()-0.5)*shakePower,(Math.random()-0.5)*shakePower);
-    shakeTime-=1/60;
-  }
-
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  bgFar.draw();
-  trees.draw();
-
-  ctx.fillStyle="#228B22";
-  ctx.fillRect(0,window.innerHeight-80,window.innerWidth,80);
-
-  if(state==="PLAYING"){
-    duck.draw(invTimer>0);
-    obstacles.forEach(o=>o.draw());
-    if(beer) beer.draw();
-
-    ctx.fillStyle="#000";
-    ctx.font="26px Arial";
-    ctx.fillText("Score: "+Math.floor(score),20,40);
-    ctx.fillText("High: "+highScore,20,70);
-  }
-
-  if(state==="MENU"){
-    ctx.fillStyle="rgba(0,0,0,0.5)";
-    ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
-
-    ctx.fillStyle="#fff";
-    ctx.textAlign="center";
-    ctx.font="48px Arial";
-    ctx.fillText("RUNNING DUCK",window.innerWidth/2,window.innerHeight/3);
-
-    ctx.font="26px Arial";
-    ctx.fillText("High Score: "+highScore,
-      window.innerWidth/2,
-      window.innerHeight/3+60);
-
-    startBtn=drawButton("START",window.innerHeight/2);
-  }
-
-  if(state==="GAMEOVER"){
-    ctx.fillStyle="rgba(0,0,0,0.6)";
-    ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
-
-    ctx.fillStyle="#fff";
-    ctx.textAlign="center";
-    ctx.font="40px Arial";
-    ctx.fillText("GAME OVER",window.innerWidth/2,window.innerHeight/3);
-
-    ctx.font="26px Arial";
-    ctx.fillText("Score: "+Math.floor(score),
-      window.innerWidth/2,
-      window.innerHeight/3+50);
-
-    ctx.fillText("High Score: "+highScore,
-      window.innerWidth/2,
-      window.innerHeight/3+90);
-
-    restartBtn=drawButton("RESTART",window.innerHeight/2);
-  }
-
-  ctx.restore();
-}
-
-function loop(now){
-  const dt=Math.min(0.033,(now-last)/1000);
-  last=now;
-  update(dt);
-  draw();
-  requestAnimationFrame(loop);
-}
-requestAnimationFrame(loop);
-
-/* =========================================================
-   INPUT
-========================================================= */
-
-function handleTap(x,y){
-  unlockAudio();
-
-  if(state==="MENU" && startBtn &&
-     x>startBtn.x && x<startBtn.x+startBtn.w &&
-     y>startBtn.y && y<startBtn.y+startBtn.h){
-       state="PLAYING";
-  }
-  else if(state==="GAMEOVER" && restartBtn &&
-     x>restartBtn.x && x<restartBtn.x+restartBtn.w &&
-     y>restartBtn.y && y<restartBtn.y+restartBtn.h){
-       reset();
-       state="PLAYING";
-  }
-  else if(state==="PLAYING"){
-       duck.jump();
-  }
-}
-
-canvas.addEventListener("touchstart",e=>{
-  e.preventDefault();
-  const rect=canvas.getBoundingClientRect();
-  const x=e.touches[0].clientX-rect.left;
-  const y=e.touches[0].clientY-rect.top;
-  handleTap(x,y);
-},{passive:false});
-
-canvas.addEventListener("mousedown",e=>{
-  const rect=canvas.getBoundingClientRect();
-  handleTap(e.clientX-rect.left,e.clientY-rect.top);
-});
-</script>
-</body>
-</html>  canvas.style.width = w + "px";
   canvas.style.height = h + "px";
 
   ctx.setTransform(DPR,0,0,DPR,0,0);
@@ -1013,7 +82,8 @@ const SFX = {
   jump:[loadAudio("jump1.mp3"), loadAudio("jump2.mp3")],
   quack:[loadAudio("quack1.mp3"), loadAudio("quack2.mp3")],
   hit: loadAudio("hit.mp3"),
-  power: loadAudio("power.mp3")
+  power: loadAudio("power.mp3"),
+  victory: loadAudio("victory.mp3")   // 👑 NEW
 };
 
 /* ================= AUDIO UNLOCK ================= */
@@ -1030,13 +100,18 @@ function unlockAudio(){
 /* ================= GAME STATE ================= */
 
 let state="MENU";
-const HS_KEY="duckHighScore";
-let highScore=Number(localStorage.getItem(HS_KEY)||0);
+const HS_KEY="runningDuckHighScore";
+let highScore = Number(localStorage.getItem(HS_KEY) || 0);
+
+let newHighScore=false;
+let newHighScoreTimer=0;
+let victoryPlayed=false;
 
 /* ================= CAMERA SHAKE ================= */
 
 let shakeTime=0;
 let shakePower=0;
+
 function triggerShake(power,duration){
   shakePower=power;
   shakeTime=duration;
@@ -1162,23 +237,10 @@ class Obstacle{
   get hitbox(){ return this; }
 }
 
-class Beer{
-  constructor(){
-    this.w=70; this.h=70;
-    this.x=window.innerWidth+200;
-    this.y=window.innerHeight-250;
-    this.speed=300;
-  }
-  update(dt){ this.x-=this.speed*dt; }
-  draw(){ if(IMG.beer.loaded) ctx.drawImage(IMG.beer,this.x,this.y,this.w,this.h); }
-  get hitbox(){ return this; }
-}
-
 /* ================= GAME ================= */
 
 let duck=new Duck();
 let obstacles=[];
-let beer=null;
 let score=0;
 let invTimer=0;
 let spawnTimer=0;
@@ -1188,9 +250,11 @@ let last=performance.now();
 function reset(){
   duck=new Duck();
   obstacles=[];
-  beer=null;
   score=0;
   invTimer=0;
+  newHighScore=false;
+  newHighScoreTimer=0;
+  victoryPlayed=false;
 }
 
 function checkCollision(a,b){
@@ -1209,9 +273,8 @@ function update(dt){
   if(state!=="PLAYING") return;
 
   duck.update(dt);
-  invTimer=Math.max(0,invTimer-dt);
-
   spawnTimer+=dt;
+
   if(spawnTimer>2){
     spawnTimer=0;
     obstacles.push(new Obstacle(worldSpeed));
@@ -1220,28 +283,21 @@ function update(dt){
   obstacles.forEach(o=>o.update(dt));
   obstacles=obstacles.filter(o=>o.x>-100);
 
-  if(Math.random()<0.003 && !beer)
-    beer=new Beer();
-
-  if(beer){
-    beer.update(dt);
-    if(checkCollision(duck.hitbox,beer.hitbox)){
-      invTimer=4;
-      playSound(SFX.power);
-      triggerShake(25,0.4);
-      beer=null;
-    }
-  }
-
   for(const o of obstacles){
     if(checkCollision(duck.hitbox,o.hitbox)){
-      if(invTimer<=0){
-        playSound(SFX.hit);
-        triggerShake(30,0.5);
-        state="GAMEOVER";
-        if(score>highScore){
-          highScore=Math.floor(score);
-          localStorage.setItem(HS_KEY,highScore);
+      state="GAMEOVER";
+
+      const finalScore=Math.floor(score);
+      if(finalScore>highScore){
+        highScore=finalScore;
+        localStorage.setItem(HS_KEY,highScore);
+
+        newHighScore=true;
+        newHighScoreTimer=2.0;
+
+        if(!victoryPlayed){
+          playSound(SFX.victory);   // 👑 PLAY VICTORY
+          victoryPlayed=true;
         }
       }
     }
@@ -1250,34 +306,9 @@ function update(dt){
   score+=dt*3;
 }
 
-/* ================= MENU BUTTON ================= */
-
-function drawButton(text,y){
-  const w=240;
-  const h=60;
-  const x=window.innerWidth/2-w/2;
-
-  ctx.fillStyle="#ffcc00";
-  ctx.fillRect(x,y,w,h);
-
-  ctx.fillStyle="#000";
-  ctx.textAlign="center";
-  ctx.font="28px Arial";
-  ctx.fillText(text,window.innerWidth/2,y+40);
-
-  return {x,y,w,h};
-}
-
-let startBtn,restartBtn;
+/* ================= DRAW ================= */
 
 function draw(){
-  ctx.save();
-
-  if(shakeTime>0){
-    ctx.translate((Math.random()-0.5)*shakePower,(Math.random()-0.5)*shakePower);
-    shakeTime-=1/60;
-  }
-
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
   bgFar.draw();
@@ -1287,25 +318,12 @@ function draw(){
   ctx.fillRect(0,window.innerHeight-80,window.innerWidth,80);
 
   if(state==="PLAYING"){
-    duck.draw(invTimer>0);
+    duck.draw(false);
     obstacles.forEach(o=>o.draw());
-    if(beer) beer.draw();
-
     ctx.fillStyle="#000";
-    ctx.font="28px Arial";
+    ctx.font="26px Arial";
     ctx.fillText("Score: "+Math.floor(score),20,40);
-  }
-
-  if(state==="MENU"){
-    ctx.fillStyle="rgba(0,0,0,0.5)";
-    ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
-
-    ctx.fillStyle="#fff";
-    ctx.textAlign="center";
-    ctx.font="48px Arial";
-    ctx.fillText("RUNNING DUCK",window.innerWidth/2,window.innerHeight/3);
-
-    startBtn=drawButton("START",window.innerHeight/2);
+    ctx.fillText("High: "+highScore,20,70);
   }
 
   if(state==="GAMEOVER"){
@@ -1318,13 +336,28 @@ function draw(){
     ctx.fillText("GAME OVER",window.innerWidth/2,window.innerHeight/3);
 
     ctx.font="26px Arial";
-    ctx.fillText("Score: "+Math.floor(score),window.innerWidth/2,window.innerHeight/3+50);
-    ctx.fillText("High Score: "+highScore,window.innerWidth/2,window.innerHeight/3+90);
+    ctx.fillText("Score: "+Math.floor(score),
+      window.innerWidth/2,
+      window.innerHeight/3+50);
 
-    restartBtn=drawButton("RESTART",window.innerHeight/2);
+    ctx.fillText("High Score: "+highScore,
+      window.innerWidth/2,
+      window.innerHeight/3+90);
+
+    if(newHighScore && newHighScoreTimer>0){
+      const pulse=1+Math.sin(performance.now()*0.01)*0.08;
+      ctx.save();
+      ctx.translate(window.innerWidth/2,window.innerHeight/2-120);
+      ctx.scale(pulse,pulse);
+      ctx.fillStyle="gold";
+      ctx.shadowBlur=20;
+      ctx.shadowColor="yellow";
+      ctx.font="bold 42px Arial";
+      ctx.fillText("NEW HIGH SCORE!",0,0);
+      ctx.restore();
+      newHighScoreTimer-=1/60;
+    }
   }
-
-  ctx.restore();
 }
 
 function loop(now){
@@ -1338,39 +371,19 @@ requestAnimationFrame(loop);
 
 /* ================= INPUT ================= */
 
-function handleTap(x,y){
+canvas.addEventListener("touchstart",()=>{
   unlockAudio();
-
-  if(state==="MENU" && startBtn &&
-     x>startBtn.x && x<startBtn.x+startBtn.w &&
-     y>startBtn.y && y<startBtn.y+startBtn.h){
-       state="PLAYING";
-  }
-  else if(state==="GAMEOVER" && restartBtn &&
-     x>restartBtn.x && x<restartBtn.x+restartBtn.w &&
-     y>restartBtn.y && y<restartBtn.y+restartBtn.h){
-       reset();
-       state="PLAYING";
-  }
-  else if(state==="PLAYING"){
-       duck.jump();
-  }
-}
-
-canvas.addEventListener("touchstart",e=>{
-  e.preventDefault();
-  const rect=canvas.getBoundingClientRect();
-  const x=e.touches[0].clientX-rect.left;
-  const y=e.touches[0].clientY-rect.top;
-  handleTap(x,y);
+  if(state==="MENU") state="PLAYING";
+  else if(state==="GAMEOVER"){ reset(); state="PLAYING"; }
+  else duck.jump();
 },{passive:false});
 
-canvas.addEventListener("mousedown",e=>{
-  const rect=canvas.getBoundingClientRect();
-  handleTap(e.clientX-rect.left,e.clientY-rect.top);
+canvas.addEventListener("mousedown",()=>{
+  unlockAudio();
+  if(state==="MENU") state="PLAYING";
+  else if(state==="GAMEOVER"){ reset(); state="PLAYING"; }
+  else duck.jump();
 });
 </script>
 </body>
 </html>
-
-
