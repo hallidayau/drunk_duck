@@ -2,11 +2,21 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport"
+content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Running Duck</title>
+
 <style>
-html,body{margin:0;padding:0;overflow:hidden;background:#87CEEB;}
-canvas{display:block;margin:auto;}
+html,body{
+  margin:0;
+  padding:0;
+  overflow:hidden;
+  touch-action:none;
+  background:#87CEEB;
+}
+canvas{
+  display:block;
+}
 </style>
 </head>
 <body>
@@ -16,9 +26,18 @@ canvas{display:block;margin:auto;}
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
+let DPR = window.devicePixelRatio || 1;
+
 function resize(){
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
+  canvas.width = w * DPR;
+  canvas.height = h * DPR;
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+
+  ctx.setTransform(DPR,0,0,DPR,0,0);
 }
 window.addEventListener("resize", resize);
 resize();
@@ -47,8 +66,7 @@ function playSound(s){
 }
 
 function playRandom(arr){
-  const s = arr[Math.floor(Math.random()*arr.length)];
-  playSound(s);
+  playSound(arr[Math.floor(Math.random()*arr.length)]);
 }
 
 /* ================= ASSETS ================= */
@@ -70,213 +88,128 @@ const SFX = {
   boss: loadAudio("boss.mp3")
 };
 
-/* ================= CAMERA SHAKE ================= */
+/* ================= MOBILE AUDIO UNLOCK ================= */
 
-let shakeTime = 0;
-let shakePower = 0;
-
-function triggerShake(power, duration){
-  shakePower = power;
-  shakeTime = duration;
+let audioUnlocked=false;
+function unlockAudio(){
+  if(audioUnlocked) return;
+  Object.values(SFX).flat().forEach(s=>{
+    if(s.play){
+      s.play().then(()=>s.pause()).catch(()=>{});
+    }
+  });
+  audioUnlocked=true;
 }
 
-/* ================= FAR BACKGROUND ================= */
+/* ================= CAMERA SHAKE ================= */
+
+let shakeTime=0;
+let shakePower=0;
+function triggerShake(power,duration){
+  shakePower=power;
+  shakeTime=duration;
+}
+
+/* ================= BACKGROUND ================= */
 
 class Parallax{
-  constructor(img, speed){
-    this.img = img;
-    this.speed = speed;
-    this.x = 0;
+  constructor(img,speed){
+    this.img=img;
+    this.speed=speed;
+    this.x=0;
   }
   update(dt){
-    this.x -= this.speed * dt;
-    if(this.x <= -canvas.width) this.x = 0;
+    this.x-=this.speed*dt;
+    if(this.x<=-canvas.width) this.x=0;
   }
   draw(){
     if(!this.img.loaded) return;
-    ctx.drawImage(this.img, this.x, 0, canvas.width, canvas.height*0.7);
-    ctx.drawImage(this.img, this.x + canvas.width, 0, canvas.width, canvas.height*0.7);
+    ctx.drawImage(this.img,this.x,0,canvas.width/DPR,canvas.height*0.7/DPR);
+    ctx.drawImage(this.img,this.x+canvas.width/DPR,0,canvas.width/DPR,canvas.height*0.7/DPR);
   }
 }
 
-const bgFar = new Parallax(IMG.bgFar, 20);
-
-/* ================= TREE LAYER ================= */
-
-class TreeLayer {
-  constructor(img, speed) {
-    this.img = img;
-    this.speed = speed;
-    this.trees = [];
-    this.spawnInitial();
+class TreeLayer{
+  constructor(img,speed){
+    this.img=img;
+    this.speed=speed;
+    this.trees=[];
+    this.spawn();
   }
-
-  spawnInitial() {
-    const spacing = 500;
-    for (let i = 0; i < 6; i++) {
-      this.trees.push({
-        x: i * spacing,
-        scale: 0.6 + Math.random() * 0.4
-      });
+  spawn(){
+    const spacing=500;
+    for(let i=0;i<6;i++){
+      this.trees.push({x:i*spacing,scale:0.6+Math.random()*0.4});
     }
   }
-
-  update(dt) {
-    for (let tree of this.trees) {
-      tree.x -= this.speed * dt;
-    }
-
-    if (this.trees.length && this.trees[0].x < -300) {
-      this.trees.shift();
-    }
-
-    const last = this.trees[this.trees.length - 1];
-    if (last && last.x < canvas.width - 500) {
-      this.trees.push({
-        x: canvas.width + Math.random() * 200,
-        scale: 0.6 + Math.random() * 0.4
-      });
+  update(dt){
+    this.trees.forEach(t=>t.x-=this.speed*dt);
+    if(this.trees.length && this.trees[0].x<-300) this.trees.shift();
+    const last=this.trees[this.trees.length-1];
+    if(last && last.x<canvas.width/DPR-500){
+      this.trees.push({x:canvas.width/DPR+200,scale:0.6+Math.random()*0.4});
     }
   }
-
-  draw() {
-    if (!this.img.loaded) return;
-
-    for (let tree of this.trees) {
-      const w = this.img.width * tree.scale;
-      const h = this.img.height * tree.scale;
-
-      ctx.drawImage(
-        this.img,
-        tree.x,
-        canvas.height - h - 80,
-        w,
-        h
-      );
-    }
+  draw(){
+    if(!this.img.loaded) return;
+    this.trees.forEach(t=>{
+      const w=this.img.width*t.scale;
+      const h=this.img.height*t.scale;
+      ctx.drawImage(this.img,t.x,(canvas.height/DPR)-h-80,w,h);
+    });
   }
 }
 
-const trees = new TreeLayer(IMG.tree, 80);
+const bgFar=new Parallax(IMG.bgFar,20);
+const trees=new TreeLayer(IMG.tree,80);
 
 /* ================= DUCK ================= */
 
 class Duck{
   constructor(){
-    this.w = 130;
-    this.h = 130;
-    this.x = 150;
-    this.groundY = canvas.height - 160;
-    this.y = this.groundY;
-    this.vy = 0;
-    this.gravity = 2200;
-    this.jumpV = -900;
-    this.grounded = true;
-    this.rot = 0;
+    this.w=Math.min(140,window.innerWidth*0.25);
+    this.h=this.w;
+    this.x=window.innerWidth*0.15;
+    this.groundY=window.innerHeight-160;
+    this.y=this.groundY;
+    this.vy=0;
+    this.gravity=2200;
+    this.jumpV=-900;
+    this.grounded=true;
+    this.rot=0;
   }
-
   jump(){
     if(!this.grounded) return;
-    this.vy = this.jumpV;
-    this.grounded = false;
+    this.vy=this.jumpV;
+    this.grounded=false;
     playRandom(SFX.jump);
     playRandom(SFX.quack);
   }
-
   update(dt){
-    this.vy += this.gravity * dt;
-    this.y += this.vy * dt;
-
-    if(this.y >= this.groundY){
-      this.y = this.groundY;
-      this.vy = 0;
-      this.grounded = true;
+    this.vy+=this.gravity*dt;
+    this.y+=this.vy*dt;
+    if(this.y>=this.groundY){
+      this.y=this.groundY;
+      this.vy=0;
+      this.grounded=true;
     }
-
-    if(!this.grounded) this.rot += 0.1;
-    else this.rot *= 0.85;
+    if(!this.grounded) this.rot+=0.1;
+    else this.rot*=0.85;
   }
-
-  draw(invincible){
+  draw(inv){
     if(!IMG.duck.loaded) return;
-
     ctx.save();
-    ctx.translate(this.x + this.w/2, this.y + this.h/2);
+    ctx.translate(this.x+this.w/2,this.y+this.h/2);
     ctx.rotate(this.rot);
-
-    if(invincible){
-      ctx.shadowBlur = 25;
-      ctx.shadowColor = "yellow";
+    if(inv){
+      ctx.shadowBlur=25;
+      ctx.shadowColor="yellow";
     }
-
-    ctx.drawImage(IMG.duck, -this.w/2, -this.h/2, this.w, this.h);
+    ctx.drawImage(IMG.duck,-this.w/2,-this.h/2,this.w,this.h);
     ctx.restore();
   }
-
   get hitbox(){
-    return { x:this.x+40, y:this.y+40, w:this.w-80, h:this.h-60 };
-  }
-}
-
-/* ================= OBSTACLE ================= */
-
-class Obstacle{
-  constructor(speed){
-    this.w = 80;
-    this.h = 100;
-    this.x = canvas.width + 100;
-    this.y = canvas.height - 140;
-    this.speed = speed;
-  }
-  update(dt){ this.x -= this.speed * dt; }
-  draw(){
-    if(IMG.obstacle.loaded)
-      ctx.drawImage(IMG.obstacle,this.x,this.y,this.w,this.h);
-  }
-  get hitbox(){ return this; }
-}
-
-/* ================= BEER ================= */
-
-class Beer{
-  constructor(){
-    this.w = 70;
-    this.h = 70;
-    this.x = canvas.width + 200;
-    this.y = canvas.height - 230;
-    this.speed = 300;
-  }
-  update(dt){ this.x -= this.speed * dt; }
-  draw(){
-    if(IMG.beer.loaded)
-      ctx.drawImage(IMG.beer,this.x,this.y,this.w,this.h);
-  }
-  get hitbox(){ return this; }
-}
-
-/* ================= BOSS ================= */
-
-class Boss{
-  constructor(){
-    this.w=250;
-    this.h=250;
-    this.x=canvas.width+400;
-    this.y=80;
-    this.speed=200;
-    this.active=false;
-  }
-  activate(){
-    this.active=true;
-    playSound(SFX.boss);
-  }
-  update(dt){
-    if(!this.active) return;
-    if(this.x > canvas.width-350)
-      this.x -= this.speed * dt;
-  }
-  draw(){
-    if(this.active && IMG.boss.loaded)
-      ctx.drawImage(IMG.boss,this.x,this.y,this.w,this.h);
+    return {x:this.x+40,y:this.y+40,w:this.w-80,h:this.h-60};
   }
 }
 
@@ -285,19 +218,42 @@ class Boss{
 let duck=new Duck();
 let obstacles=[];
 let beer=null;
-let boss=new Boss();
 let score=0;
 let invTimer=0;
-let worldSpeed=500;
 let spawnTimer=0;
-let last=performance.now();
+let worldSpeed=500;
 let state="MENU";
+let last=performance.now();
+
+class Obstacle{
+  constructor(speed){
+    this.w=80;
+    this.h=100;
+    this.x=window.innerWidth+100;
+    this.y=window.innerHeight-140;
+    this.speed=speed;
+  }
+  update(dt){ this.x-=this.speed*dt; }
+  draw(){ if(IMG.obstacle.loaded) ctx.drawImage(IMG.obstacle,this.x,this.y,this.w,this.h); }
+  get hitbox(){ return this; }
+}
+
+class Beer{
+  constructor(){
+    this.w=70; this.h=70;
+    this.x=window.innerWidth+200;
+    this.y=window.innerHeight-250;
+    this.speed=300;
+  }
+  update(dt){ this.x-=this.speed*dt; }
+  draw(){ if(IMG.beer.loaded) ctx.drawImage(IMG.beer,this.x,this.y,this.w,this.h); }
+  get hitbox(){ return this; }
+}
 
 function reset(){
   duck=new Duck();
   obstacles=[];
   beer=null;
-  boss=new Boss();
   score=0;
   invTimer=0;
 }
@@ -352,11 +308,6 @@ function update(dt){
     }
   }
 
-  if(score>30 && !boss.active)
-    boss.activate();
-
-  boss.update(dt);
-
   score+=dt*3;
 }
 
@@ -364,27 +315,24 @@ function draw(){
   ctx.save();
 
   if(shakeTime>0){
-    const dx=(Math.random()-0.5)*shakePower;
-    const dy=(Math.random()-0.5)*shakePower;
-    ctx.translate(dx,dy);
+    ctx.translate((Math.random()-0.5)*shakePower,(Math.random()-0.5)*shakePower);
     shakeTime-=1/60;
   }
 
-  ctx.clearRect(-100,-100,canvas.width+200,canvas.height+200);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
   bgFar.draw();
   trees.draw();
 
   ctx.fillStyle="#228B22";
-  ctx.fillRect(0,canvas.height-80,canvas.width,80);
+  ctx.fillRect(0,window.innerHeight-80,window.innerWidth,80);
 
   duck.draw(invTimer>0);
   obstacles.forEach(o=>o.draw());
   if(beer) beer.draw();
-  boss.draw();
 
   ctx.fillStyle="#000";
-  ctx.font="20px Arial";
+  ctx.font="28px Arial";
   ctx.fillText("Score: "+Math.floor(score),20,40);
 
   ctx.restore();
@@ -399,18 +347,26 @@ function loop(now){
 }
 requestAnimationFrame(loop);
 
-window.addEventListener("keydown",e=>{
-  if(e.key===" "){
-    if(state==="MENU") state="PLAYING";
-    else if(state==="GAMEOVER"){ reset(); state="PLAYING"; }
-    else duck.jump();
-  }
-});
-canvas.addEventListener("mousedown",()=>{
+/* ================= CONTROLS ================= */
+
+function handleInput(){
+  unlockAudio();
   if(state==="MENU") state="PLAYING";
   else if(state==="GAMEOVER"){ reset(); state="PLAYING"; }
   else duck.jump();
+}
+
+window.addEventListener("keydown",e=>{
+  if(e.key===" ") handleInput();
 });
+
+canvas.addEventListener("touchstart",e=>{
+  e.preventDefault();
+  handleInput();
+},{passive:false});
+
+canvas.addEventListener("mousedown",handleInput);
+
 </script>
 </body>
 </html>
