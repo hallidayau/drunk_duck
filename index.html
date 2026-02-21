@@ -75,7 +75,6 @@ const IMG = {
   duck: loadImage("duck.png"),
   obstacle: loadImage("obstacle.png"),
   beer: loadImage("beer.png"),
-  boss: loadImage("boss.png"),
   bgFar: loadImage("bg_far.png"),
   tree: loadImage("bg_mid.png")
 };
@@ -84,22 +83,25 @@ const SFX = {
   jump:[loadAudio("jump1.mp3"), loadAudio("jump2.mp3")],
   quack:[loadAudio("quack1.mp3"), loadAudio("quack2.mp3")],
   hit: loadAudio("hit.mp3"),
-  power: loadAudio("power.mp3"),
-  boss: loadAudio("boss.mp3")
+  power: loadAudio("power.mp3")
 };
 
-/* ================= MOBILE AUDIO UNLOCK ================= */
+/* ================= AUDIO UNLOCK ================= */
 
 let audioUnlocked=false;
 function unlockAudio(){
   if(audioUnlocked) return;
   Object.values(SFX).flat().forEach(s=>{
-    if(s.play){
-      s.play().then(()=>s.pause()).catch(()=>{});
-    }
+    s.play().then(()=>s.pause()).catch(()=>{});
   });
   audioUnlocked=true;
 }
+
+/* ================= GAME STATE ================= */
+
+let state="MENU";
+const HS_KEY="duckHighScore";
+let highScore=Number(localStorage.getItem(HS_KEY)||0);
 
 /* ================= CAMERA SHAKE ================= */
 
@@ -120,12 +122,14 @@ class Parallax{
   }
   update(dt){
     this.x-=this.speed*dt;
-    if(this.x<=-canvas.width) this.x=0;
+    if(this.x<=-canvas.width/DPR) this.x=0;
   }
   draw(){
     if(!this.img.loaded) return;
-    ctx.drawImage(this.img,this.x,0,canvas.width/DPR,canvas.height*0.7/DPR);
-    ctx.drawImage(this.img,this.x+canvas.width/DPR,0,canvas.width/DPR,canvas.height*0.7/DPR);
+    const w=canvas.width/DPR;
+    const h=canvas.height/DPR;
+    ctx.drawImage(this.img,this.x,0,w,h*0.7);
+    ctx.drawImage(this.img,this.x+w,0,w,h*0.7);
   }
 }
 
@@ -213,17 +217,7 @@ class Duck{
   }
 }
 
-/* ================= GAME ================= */
-
-let duck=new Duck();
-let obstacles=[];
-let beer=null;
-let score=0;
-let invTimer=0;
-let spawnTimer=0;
-let worldSpeed=500;
-let state="MENU";
-let last=performance.now();
+/* ================= OBSTACLE ================= */
 
 class Obstacle{
   constructor(speed){
@@ -249,6 +243,17 @@ class Beer{
   draw(){ if(IMG.beer.loaded) ctx.drawImage(IMG.beer,this.x,this.y,this.w,this.h); }
   get hitbox(){ return this; }
 }
+
+/* ================= GAME ================= */
+
+let duck=new Duck();
+let obstacles=[];
+let beer=null;
+let score=0;
+let invTimer=0;
+let spawnTimer=0;
+let worldSpeed=500;
+let last=performance.now();
 
 function reset(){
   duck=new Duck();
@@ -304,12 +309,36 @@ function update(dt){
         playSound(SFX.hit);
         triggerShake(30,0.5);
         state="GAMEOVER";
+        if(score>highScore){
+          highScore=Math.floor(score);
+          localStorage.setItem(HS_KEY,highScore);
+        }
       }
     }
   }
 
   score+=dt*3;
 }
+
+/* ================= MENU BUTTON ================= */
+
+function drawButton(text,y){
+  const w=240;
+  const h=60;
+  const x=window.innerWidth/2-w/2;
+
+  ctx.fillStyle="#ffcc00";
+  ctx.fillRect(x,y,w,h);
+
+  ctx.fillStyle="#000";
+  ctx.textAlign="center";
+  ctx.font="28px Arial";
+  ctx.fillText(text,window.innerWidth/2,y+40);
+
+  return {x,y,w,h};
+}
+
+let startBtn,restartBtn;
 
 function draw(){
   ctx.save();
@@ -327,13 +356,43 @@ function draw(){
   ctx.fillStyle="#228B22";
   ctx.fillRect(0,window.innerHeight-80,window.innerWidth,80);
 
-  duck.draw(invTimer>0);
-  obstacles.forEach(o=>o.draw());
-  if(beer) beer.draw();
+  if(state==="PLAYING"){
+    duck.draw(invTimer>0);
+    obstacles.forEach(o=>o.draw());
+    if(beer) beer.draw();
 
-  ctx.fillStyle="#000";
-  ctx.font="28px Arial";
-  ctx.fillText("Score: "+Math.floor(score),20,40);
+    ctx.fillStyle="#000";
+    ctx.font="28px Arial";
+    ctx.fillText("Score: "+Math.floor(score),20,40);
+  }
+
+  if(state==="MENU"){
+    ctx.fillStyle="rgba(0,0,0,0.5)";
+    ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
+
+    ctx.fillStyle="#fff";
+    ctx.textAlign="center";
+    ctx.font="48px Arial";
+    ctx.fillText("RUNNING DUCK",window.innerWidth/2,window.innerHeight/3);
+
+    startBtn=drawButton("START",window.innerHeight/2);
+  }
+
+  if(state==="GAMEOVER"){
+    ctx.fillStyle="rgba(0,0,0,0.6)";
+    ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
+
+    ctx.fillStyle="#fff";
+    ctx.textAlign="center";
+    ctx.font="40px Arial";
+    ctx.fillText("GAME OVER",window.innerWidth/2,window.innerHeight/3);
+
+    ctx.font="26px Arial";
+    ctx.fillText("Score: "+Math.floor(score),window.innerWidth/2,window.innerHeight/3+50);
+    ctx.fillText("High Score: "+highScore,window.innerWidth/2,window.innerHeight/3+90);
+
+    restartBtn=drawButton("RESTART",window.innerHeight/2);
+  }
 
   ctx.restore();
 }
@@ -347,26 +406,39 @@ function loop(now){
 }
 requestAnimationFrame(loop);
 
-/* ================= CONTROLS ================= */
+/* ================= INPUT ================= */
 
-function handleInput(){
+function handleTap(x,y){
   unlockAudio();
-  if(state==="MENU") state="PLAYING";
-  else if(state==="GAMEOVER"){ reset(); state="PLAYING"; }
-  else duck.jump();
-}
 
-window.addEventListener("keydown",e=>{
-  if(e.key===" ") handleInput();
-});
+  if(state==="MENU" && startBtn &&
+     x>startBtn.x && x<startBtn.x+startBtn.w &&
+     y>startBtn.y && y<startBtn.y+startBtn.h){
+       state="PLAYING";
+  }
+  else if(state==="GAMEOVER" && restartBtn &&
+     x>restartBtn.x && x<restartBtn.x+restartBtn.w &&
+     y>restartBtn.y && y<restartBtn.y+restartBtn.h){
+       reset();
+       state="PLAYING";
+  }
+  else if(state==="PLAYING"){
+       duck.jump();
+  }
+}
 
 canvas.addEventListener("touchstart",e=>{
   e.preventDefault();
-  handleInput();
+  const rect=canvas.getBoundingClientRect();
+  const x=e.touches[0].clientX-rect.left;
+  const y=e.touches[0].clientY-rect.top;
+  handleTap(x,y);
 },{passive:false});
 
-canvas.addEventListener("mousedown",handleInput);
-
+canvas.addEventListener("mousedown",e=>{
+  const rect=canvas.getBoundingClientRect();
+  handleTap(e.clientX-rect.left,e.clientY-rect.top);
+});
 </script>
 </body>
 </html>
